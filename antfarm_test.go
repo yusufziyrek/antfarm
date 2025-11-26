@@ -13,6 +13,7 @@ import (
 
 // TestBasicProcessing verifies that a pool processes all submitted jobs.
 func TestBasicProcessing(t *testing.T) {
+	t.Log("Starting TestBasicProcessing")
 	jobCount := 100
 	handler := func(ctx context.Context, job int) (int, error) {
 		return job * 2, nil
@@ -21,6 +22,7 @@ func TestBasicProcessing(t *testing.T) {
 	pool := antfarm.New(10, handler)
 	pool.Start()
 
+	// Submit jobs
 	go func() {
 		for i := 0; i < jobCount; i++ {
 			if err := pool.Submit(i); err != nil {
@@ -35,13 +37,9 @@ func TestBasicProcessing(t *testing.T) {
 		if res.Err != nil {
 			t.Errorf("unexpected error: %v", res.Err)
 		}
-		if res.Value != receivedCount*2 {
-			// Note: Order is not guaranteed, so we can't check value match by index easily without sorting.
-			// But for this simple test, we just check count.
-			// Actually, let's just count them.
-		}
 		receivedCount++
 	}
+	t.Logf("TestBasicProcessing: Received %d results", receivedCount)
 
 	if receivedCount != jobCount {
 		t.Errorf("expected %d results, got %d", jobCount, receivedCount)
@@ -50,47 +48,54 @@ func TestBasicProcessing(t *testing.T) {
 
 // TestConcurrency ensures workers run in parallel.
 func TestConcurrency(t *testing.T) {
+	t.Log("Starting TestConcurrency")
 	concurrency := 5
-	// Use a channel to coordinate workers to ensure they are running simultaneously
 	startGate := make(chan struct{})
 	var activeWorkers int32
 
 	handler := func(ctx context.Context, _ int) (int, error) {
 		atomic.AddInt32(&activeWorkers, 1)
 		defer atomic.AddInt32(&activeWorkers, -1)
-
-		// Wait for signal to proceed, ensuring all workers are ready
 		<-startGate
 		return 0, nil
 	}
 
-	pool := antfarm.New(concurrency, handler)
+	// Use buffered channels to prevent blocking during setup
+	pool := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
 	pool.Start()
 
-	// Submit enough jobs to fill all workers
-	for i := 0; i < concurrency; i++ {
-		pool.Submit(i)
-	}
+	// Start consuming results immediately in background to prevent deadlock
+	go func() {
+		for range pool.Results() {
+		}
+		t.Log("TestConcurrency: Results drained")
+	}()
 
-	// Give a moment for workers to pick up jobs and increment counter
-	time.Sleep(50 * time.Millisecond)
+	// Submit jobs
+	go func() {
+		for i := 0; i < concurrency; i++ {
+			pool.Submit(i)
+		}
+		t.Log("TestConcurrency: Jobs submitted")
+	}()
+
+	time.Sleep(100 * time.Millisecond)
 
 	currentActive := atomic.LoadInt32(&activeWorkers)
+	t.Logf("TestConcurrency: Active workers: %d", currentActive)
 	if currentActive != int32(concurrency) {
 		t.Errorf("expected %d active workers, got %d", concurrency, currentActive)
 	}
 
-	// Release workers
 	close(startGate)
+	t.Log("TestConcurrency: Gate closed, shutting down")
 	pool.Shutdown()
-
-	// Drain results
-	for range pool.Results() {
-	}
+	t.Log("TestConcurrency: Shutdown complete")
 }
 
 // TestGracefulShutdown verifies that submitted jobs are completed before shutdown returns.
 func TestGracefulShutdown(t *testing.T) {
+	t.Log("Starting TestGracefulShutdown")
 	var completedJobs int32
 	jobCount := 20
 
@@ -103,17 +108,25 @@ func TestGracefulShutdown(t *testing.T) {
 	pool := antfarm.New(5, handler)
 	pool.Start()
 
+	// Use a done channel to wait for results to be fully drained
+	done := make(chan struct{})
+	go func() {
+		for range pool.Results() {
+		}
+		t.Log("TestGracefulShutdown: Results drained")
+		close(done)
+	}()
+
 	go func() {
 		for i := 0; i < jobCount; i++ {
 			pool.Submit(i)
 		}
-		// Shutdown immediately after submitting
+		t.Log("TestGracefulShutdown: Jobs submitted, shutting down")
 		pool.Shutdown()
 	}()
 
-	// Wait for results channel to close
-	for range pool.Results() {
-	}
+	// Wait for results to be fully drained (which implies Shutdown is complete)
+	<-done
 
 	if atomic.LoadInt32(&completedJobs) != int32(jobCount) {
 		t.Errorf("expected %d completed jobs, got %d", jobCount, completedJobs)
@@ -122,6 +135,7 @@ func TestGracefulShutdown(t *testing.T) {
 
 // TestMiddleware verifies middleware execution order and functionality.
 func TestMiddleware(t *testing.T) {
+	t.Log("Starting TestMiddleware")
 	var executionLog []string
 	var mu sync.Mutex
 
@@ -154,14 +168,23 @@ func TestMiddleware(t *testing.T) {
 		return job, nil
 	}
 
-	// Order: mw1 -> mw2 -> handler
 	pool := antfarm.New(1, handler, antfarm.WithMiddleware(mw1, mw2))
 	pool.Start()
 
+	// Start consuming results in BG to prevent deadlock
+	done := make(chan struct{})
+	go func() {
+		for range pool.Results() {
+		}
+		close(done)
+	}()
+
 	pool.Submit(1)
 	pool.Shutdown()
-	for range pool.Results() {
-	}
+
+	// Wait for results to drain
+	<-done
+	t.Log("TestMiddleware: Finished")
 
 	expected := []string{"mw1 start", "mw2 start", "handler", "mw2 end", "mw1 end"}
 
@@ -183,6 +206,13 @@ func TestMiddleware(t *testing.T) {
 func TestSubmitAfterShutdown(t *testing.T) {
 	pool := antfarm.New(1, func(ctx context.Context, i int) (int, error) { return i, nil })
 	pool.Start()
+
+	// Consume results in BG
+	go func() {
+		for range pool.Results() {
+		}
+	}()
+
 	pool.Shutdown()
 
 	err := pool.Submit(1)

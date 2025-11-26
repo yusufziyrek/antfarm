@@ -32,10 +32,9 @@ func (p *Pool[T, R]) worker() {
 		// However, if the user doesn't read results, this will block the worker.
 		// We should document that Results() must be consumed if R is not struct{}.
 
-		select {
-		case p.resultQueue <- Result[R]{Value: result, Err: err}:
-		case <-p.quit:
-			return
-		}
+		// Send result
+		// We block here to ensure backpressure and guaranteed delivery.
+		// Users must consume Results() channel to prevent deadlocks.
+		p.resultQueue <- Result[R]{Value: result, Err: err}
 	}
 }
