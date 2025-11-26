@@ -57,6 +57,8 @@ func main() {
 }
 ```
 
+> **⚠️ Important:** You **MUST** consume the `Results()` channel (or drain it) even if you don't need the output. Since AntFarm uses blocking sends for data safety, failing to read from the result channel will cause the workers to block indefinitely (deadlock).
+
 ## 🛠 Configuration & Middleware
 
 AntFarm uses the **Functional Options** pattern for configuration.
