@@ -2,13 +2,13 @@
 
 **AntFarm** is a high-performance, type-safe, generic worker pool library for Go (Golang). It is designed with **SOLID principles** in mind, offering a clean API, strict type safety via Go Generics, and extensibility through a robust Middleware pattern.
 
-![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)
+![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yusufziyrek/antfarm)](https://goreportcard.com/report/github.com/yusufziyrek/antfarm)
 
 ## 🚀 Features
 
-*   **Type-Safe:** Built with Go 1.21+ Generics (`[T, R]`). No more `interface{}` casting.
+*   **Type-Safe:** Built with Go 1.25+ Generics (`[T, R]`). No more `interface{}` casting.
 *   **High Performance:** Minimal overhead, using standard `sync` and channels.
 *   **Extensible:** Add Logging, Metrics, Tracing, or Retries using the **Middleware Pattern**.
 *   **Graceful Shutdown:** Ensures all active jobs are completed before exiting.
