@@ -4,7 +4,7 @@
 
 Designed for modern Go applications, AntFarm offers strict compile-time type safety, zero dependencies, and a flexible middleware system to easily add logging, metrics, or retries to your background jobs.
 
-![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)
+![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yusufziyrek/antfarm)](https://goreportcard.com/report/github.com/yusufziyrek/antfarm)
 
@@ -94,6 +94,17 @@ pool := antfarm.New(5, handler,
 ```
 
 See `examples/middleware/` for more advanced examples like **Retries**.
+
+## 📊 Observability & Stats
+
+AntFarm provides real-time metrics to monitor your worker pool's health and performance.
+
+```go
+stats := pool.Stats()
+fmt.Printf("Busy Workers: %d\n", stats.BusyWorkers)
+fmt.Printf("Submitted: %d, Completed: %d, Failed: %d\n", 
+    stats.SubmittedJobs, stats.CompletedJobs, stats.FailedJobs)
+```
 
 ## 🤝 Contributing
 
