@@ -7,11 +7,12 @@ Designed for modern Go applications, AntFarm offers strict compile-time type saf
 ![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yusufziyrek/antfarm)](https://goreportcard.com/report/github.com/yusufziyrek/antfarm)
+[![Go Reference](https://pkg.go.dev/badge/github.com/yusufziyrek/antfarm.svg)](https://pkg.go.dev/github.com/yusufziyrek/antfarm)
 
 ## 🚀 Why AntFarm?
 
 *   **Type-Safe & Generic:** Leverage Go Generics (`[T, R]`) for strict type checking at compile time. No more runtime casting or `interface{}` risks.
-*   **Production Ready:** Built-in support for `context.Context` propagation, graceful shutdowns, and panic recovery (via middleware).
+*   **Production Ready:** Built-in support for `context.Context` propagation, graceful shutdowns, and robust panic recovery.
 *   **High Performance:** Minimal overhead using standard `sync` primitives and channels.
 *   **Developer Friendly:** Simple, fluent API using the Functional Options pattern.
 *   **Extensible:** Easily plug in cross-cutting concerns like logging, tracing, or rate limiting using the Middleware pattern.
@@ -101,6 +102,7 @@ AntFarm provides real-time metrics to monitor your worker pool's health and perf
 
 ```go
 stats := pool.Stats()
+fmt.Printf("Concurrency: %d\n", stats.Concurrency)
 fmt.Printf("Busy Workers: %d\n", stats.BusyWorkers)
 fmt.Printf("Submitted: %d, Completed: %d, Failed: %d\n", 
     stats.SubmittedJobs, stats.CompletedJobs, stats.FailedJobs)
