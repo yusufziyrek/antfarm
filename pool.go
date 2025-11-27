@@ -1,7 +1,12 @@
 package antfarm
 
-// Start initializes the workers and starts processing jobs.
-// It does not block.
+import (
+	"context"
+	"sync/atomic"
+)
+
+// Start initializes the worker goroutines and begins processing jobs.
+// This method is non-blocking.
 func (p *Pool[T, R]) Start() {
 	p.wg.Add(p.concurrency)
 	for i := 0; i < p.concurrency; i++ {
@@ -9,53 +14,59 @@ func (p *Pool[T, R]) Start() {
 	}
 }
 
-// Submit adds a job to the pool.
+// Submit adds a job to the pool for processing.
 // It blocks if the job queue is full.
-// Returns ErrPoolClosed if the pool is shutting down or closed.
-func (p *Pool[T, R]) Submit(job T) error {
+// It returns ErrPoolClosed if the pool is shutting down or closed.
+// The provided context is passed to the handler and can be used for cancellation or timeouts.
+func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
+	if atomic.LoadInt32(&p.closed) == 1 {
+		return ErrPoolClosed
+	}
+
 	p.mu.RLock()
-	if p.closed {
+	if atomic.LoadInt32(&p.closed) == 1 {
 		p.mu.RUnlock()
 		return ErrPoolClosed
 	}
+	p.submitWg.Add(1)
 	p.mu.RUnlock()
 
+	defer p.submitWg.Done()
+
 	select {
-	case p.jobQueue <- job:
+	case p.jobQueue <- jobWrapper[T]{ctx: ctx, payload: job}:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-p.quit:
 		return ErrPoolClosed
 	}
 }
 
-// Results returns the read-only channel for results.
+// Results returns a read-only channel to consume job results.
+// The channel is closed when the pool is fully shut down and all results have been published.
 func (p *Pool[T, R]) Results() <-chan Result[R] {
 	return p.resultQueue
 }
 
-// Shutdown gracefully shuts down the pool.
-// It closes the job queue and waits for all workers to finish processing currently active jobs.
-// It does NOT wait for the job queue to drain if workers are busy, but standard worker pool behavior
-// usually implies closing the channel drains it.
-// Here, we will close the job queue so workers finish the range loop.
+// Shutdown gracefully stops the pool.
+// It stops accepting new jobs and waits for:
+// 1. All active Submit calls to return.
+// 2. All active workers to finish their current jobs.
+// 3. The job queue to be drained (if workers are still processing).
+// Finally, it closes the results channel.
 func (p *Pool[T, R]) Shutdown() {
 	p.mu.Lock()
-	if p.closed {
+	if atomic.LoadInt32(&p.closed) == 1 {
 		p.mu.Unlock()
 		return
 	}
-	p.closed = true
+	atomic.StoreInt32(&p.closed, 1)
 	p.mu.Unlock()
 
-	// Closing the channel signals workers to finish after they drain the channel.
-	close(p.jobQueue)
-
-	// Signal quit for any blocking operations (like Submit)
 	close(p.quit)
-
-	// Wait for all workers to finish
+	p.submitWg.Wait()
+	close(p.jobQueue)
 	p.wg.Wait()
-
-	// Close result queue
 	close(p.resultQueue)
 }

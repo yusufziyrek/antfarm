@@ -29,7 +29,7 @@ func main() {
 	// Submit jobs in a separate goroutine
 	go func() {
 		for i := 0; i < 10; i++ {
-			if err := pool.Submit(i); err != nil {
+			if err := pool.Submit(context.Background(), i); err != nil {
 				log.Printf("Failed to submit job %d: %v", i, err)
 			} else {
 				fmt.Printf("Submitted job %d\n", i)

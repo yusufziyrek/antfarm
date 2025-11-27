@@ -1,19 +1,20 @@
 # 🐜 AntFarm
 
-**AntFarm** is a high-performance, type-safe, generic worker pool library for Go (Golang). It is designed with **SOLID principles** in mind, offering a clean API, strict type safety via Go Generics, and extensibility through a robust Middleware pattern.
+**AntFarm** is a production-ready, generic worker pool for Go that makes concurrency easy, safe, and efficient. It abstracts away the complexities of goroutine management, context propagation, and graceful shutdowns, allowing you to focus on your business logic.
+
+Designed for modern Go applications, AntFarm offers strict compile-time type safety, zero dependencies, and a flexible middleware system to easily add logging, metrics, or retries to your background jobs.
 
 ![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/yusufziyrek/antfarm)](https://goreportcard.com/report/github.com/yusufziyrek/antfarm)
 
-## 🚀 Features
+## 🚀 Why AntFarm?
 
-*   **Type-Safe:** Built with Go 1.25+ Generics (`[T, R]`). No more `interface{}` casting.
-*   **High Performance:** Minimal overhead, using standard `sync` and channels.
-*   **Extensible:** Add Logging, Metrics, Tracing, or Retries using the **Middleware Pattern**.
-*   **Graceful Shutdown:** Ensures all active jobs are completed before exiting.
-*   **Simple API:** Functional Options pattern for easy configuration.
-*   **Zero Dependencies:** Relies only on the Go Standard Library.
+*   **Type-Safe & Generic:** Leverage Go Generics (`[T, R]`) for strict type checking at compile time. No more runtime casting or `interface{}` risks.
+*   **Production Ready:** Built-in support for `context.Context` propagation, graceful shutdowns, and panic recovery (via middleware).
+*   **High Performance:** Minimal overhead using standard `sync` primitives and channels.
+*   **Developer Friendly:** Simple, fluent API using the Functional Options pattern.
+*   **Extensible:** Easily plug in cross-cutting concerns like logging, tracing, or rate limiting using the Middleware pattern.
 
 ## 📦 Installation
 
@@ -44,8 +45,10 @@ func main() {
 
 	// 3. Submit jobs
 	go func() {
+		ctx := context.Background()
 		for i := 0; i < 5; i++ {
-			pool.Submit(i)
+			// Submit now accepts a context for timeout/cancellation
+			pool.Submit(ctx, i)
 		}
 		pool.Shutdown()
 	}()
@@ -57,7 +60,7 @@ func main() {
 }
 ```
 
-> **⚠️ Important:** You **MUST** consume the `Results()` channel (or drain it) even if you don't need the output. Since AntFarm uses blocking sends for data safety, failing to read from the result channel will cause the workers to block indefinitely (deadlock).
+> **⚠️ Note on Backpressure:** AntFarm uses blocking channels to ensure data safety and backpressure. You should consume the `Results()` channel (or drain it) to prevent workers from blocking if the result buffer fills up.
 
 ## 🛠 Configuration & Middleware
 

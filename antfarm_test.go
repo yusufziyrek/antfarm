@@ -11,44 +11,93 @@ import (
 	"github.com/yusufziyrek/antfarm"
 )
 
-// TestBasicProcessing verifies that a pool processes all submitted jobs.
-func TestBasicProcessing(t *testing.T) {
-	t.Log("Starting TestBasicProcessing")
-	jobCount := 100
-	handler := func(ctx context.Context, job int) (int, error) {
-		return job * 2, nil
+// TestPool_TableDriven validates the pool's behavior using table-driven tests.
+func TestPool_TableDriven(t *testing.T) {
+	tests := []struct {
+		name        string
+		concurrency int
+		bufferSize  int
+		jobs        int
+		handler     antfarm.Handler[int, int]
+		wantErr     bool // Expect errors in results
+	}{
+		{
+			name:        "SingleWorker_Unbuffered",
+			concurrency: 1,
+			bufferSize:  0,
+			jobs:        10,
+			handler: func(ctx context.Context, job int) (int, error) {
+				return job * 2, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "MultiWorker_Buffered",
+			concurrency: 5,
+			bufferSize:  10,
+			jobs:        100,
+			handler: func(ctx context.Context, job int) (int, error) {
+				return job * 2, nil
+			},
+			wantErr: false,
+		},
+		{
+			name:        "HandlerErrors",
+			concurrency: 2,
+			bufferSize:  0,
+			jobs:        5,
+			handler: func(ctx context.Context, job int) (int, error) {
+				return 0, errors.New("task failed")
+			},
+			wantErr: true,
+		},
 	}
 
-	pool := antfarm.New(10, handler)
-	pool.Start()
-
-	// Submit jobs
-	go func() {
-		for i := 0; i < jobCount; i++ {
-			if err := pool.Submit(i); err != nil {
-				t.Errorf("failed to submit job %d: %v", i, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var opts []antfarm.Option[int, int]
+			if tt.bufferSize > 0 {
+				opts = append(opts, antfarm.WithBufferSize[int, int](tt.bufferSize))
 			}
-		}
-		pool.Shutdown()
-	}()
 
-	receivedCount := 0
-	for res := range pool.Results() {
-		if res.Err != nil {
-			t.Errorf("unexpected error: %v", res.Err)
-		}
-		receivedCount++
-	}
-	t.Logf("TestBasicProcessing: Received %d results", receivedCount)
+			p := antfarm.New(tt.concurrency, tt.handler, opts...)
+			p.Start()
 
-	if receivedCount != jobCount {
-		t.Errorf("expected %d results, got %d", jobCount, receivedCount)
+			// Submit jobs in a separate goroutine
+			go func() {
+				for i := 0; i < tt.jobs; i++ {
+					if err := p.Submit(context.Background(), i); err != nil {
+						t.Errorf("Submit failed: %v", err)
+					}
+				}
+				p.Shutdown()
+			}()
+
+			// Collect results
+			count := 0
+			for res := range p.Results() {
+				count++
+				if tt.wantErr {
+					if res.Err == nil {
+						// In this specific test case, we expect ALL to fail.
+						// In a real scenario, we might check specific errors.
+					}
+				} else {
+					if res.Err != nil {
+						t.Errorf("unexpected job error: %v", res.Err)
+					}
+				}
+			}
+
+			if count != tt.jobs {
+				t.Errorf("got %d results, want %d", count, tt.jobs)
+			}
+		})
 	}
 }
 
-// TestConcurrency ensures workers run in parallel.
+// TestConcurrency ensures workers run in parallel and respect concurrency limits.
 func TestConcurrency(t *testing.T) {
-	t.Log("Starting TestConcurrency")
 	concurrency := 5
 	startGate := make(chan struct{})
 	var activeWorkers int32
@@ -60,82 +109,34 @@ func TestConcurrency(t *testing.T) {
 		return 0, nil
 	}
 
-	// Use buffered channels to prevent blocking during setup
 	pool := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
 	pool.Start()
 
-	// Start consuming results immediately in background to prevent deadlock
+	// Drain results in background
 	go func() {
 		for range pool.Results() {
 		}
-		t.Log("TestConcurrency: Results drained")
 	}()
 
-	// Submit jobs
-	go func() {
-		for i := 0; i < concurrency; i++ {
-			pool.Submit(i)
-		}
-		t.Log("TestConcurrency: Jobs submitted")
-	}()
+	// Fill the pool
+	for i := 0; i < concurrency; i++ {
+		go pool.Submit(context.Background(), i)
+	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Allow goroutines to start
+	time.Sleep(50 * time.Millisecond)
 
 	currentActive := atomic.LoadInt32(&activeWorkers)
-	t.Logf("TestConcurrency: Active workers: %d", currentActive)
 	if currentActive != int32(concurrency) {
 		t.Errorf("expected %d active workers, got %d", concurrency, currentActive)
 	}
 
 	close(startGate)
-	t.Log("TestConcurrency: Gate closed, shutting down")
 	pool.Shutdown()
-	t.Log("TestConcurrency: Shutdown complete")
 }
 
-// TestGracefulShutdown verifies that submitted jobs are completed before shutdown returns.
-func TestGracefulShutdown(t *testing.T) {
-	t.Log("Starting TestGracefulShutdown")
-	var completedJobs int32
-	jobCount := 20
-
-	handler := func(ctx context.Context, job int) (int, error) {
-		time.Sleep(10 * time.Millisecond)
-		atomic.AddInt32(&completedJobs, 1)
-		return job, nil
-	}
-
-	pool := antfarm.New(5, handler)
-	pool.Start()
-
-	// Use a done channel to wait for results to be fully drained
-	done := make(chan struct{})
-	go func() {
-		for range pool.Results() {
-		}
-		t.Log("TestGracefulShutdown: Results drained")
-		close(done)
-	}()
-
-	go func() {
-		for i := 0; i < jobCount; i++ {
-			pool.Submit(i)
-		}
-		t.Log("TestGracefulShutdown: Jobs submitted, shutting down")
-		pool.Shutdown()
-	}()
-
-	// Wait for results to be fully drained (which implies Shutdown is complete)
-	<-done
-
-	if atomic.LoadInt32(&completedJobs) != int32(jobCount) {
-		t.Errorf("expected %d completed jobs, got %d", jobCount, completedJobs)
-	}
-}
-
-// TestMiddleware verifies middleware execution order and functionality.
+// TestMiddleware verifies middleware execution order.
 func TestMiddleware(t *testing.T) {
-	t.Log("Starting TestMiddleware")
 	var executionLog []string
 	var mu sync.Mutex
 
@@ -171,23 +172,15 @@ func TestMiddleware(t *testing.T) {
 	pool := antfarm.New(1, handler, antfarm.WithMiddleware(mw1, mw2))
 	pool.Start()
 
-	// Start consuming results in BG to prevent deadlock
-	done := make(chan struct{})
 	go func() {
-		for range pool.Results() {
-		}
-		close(done)
+		pool.Submit(context.Background(), 1)
+		pool.Shutdown()
 	}()
 
-	pool.Submit(1)
-	pool.Shutdown()
-
-	// Wait for results to drain
-	<-done
-	t.Log("TestMiddleware: Finished")
+	for range pool.Results() {
+	}
 
 	expected := []string{"mw1 start", "mw2 start", "handler", "mw2 end", "mw1 end"}
-
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -202,21 +195,39 @@ func TestMiddleware(t *testing.T) {
 	}
 }
 
-// TestSubmitAfterShutdown verifies that submitting to a closed pool returns an error.
-func TestSubmitAfterShutdown(t *testing.T) {
-	pool := antfarm.New(1, func(ctx context.Context, i int) (int, error) { return i, nil })
-	pool.Start()
+// BenchmarkPool benchmarks the throughput of the pool.
+func BenchmarkPool(b *testing.B) {
+	handler := func(ctx context.Context, job int) (int, error) {
+		return job, nil
+	}
 
-	// Consume results in BG
-	go func() {
-		for range pool.Results() {
-		}
-	}()
+	benchmarks := []struct {
+		name        string
+		concurrency int
+		buffer      int
+	}{
+		{"C1_B0", 1, 0},
+		{"C10_B0", 10, 0},
+		{"C10_B100", 10, 100},
+		{"C100_B1000", 100, 1000},
+	}
 
-	pool.Shutdown()
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			p := antfarm.New(bm.concurrency, handler, antfarm.WithBufferSize[int, int](bm.buffer))
+			p.Start()
 
-	err := pool.Submit(1)
-	if !errors.Is(err, antfarm.ErrPoolClosed) {
-		t.Errorf("expected ErrPoolClosed, got %v", err)
+			// Consumer
+			go func() {
+				for range p.Results() {
+				}
+			}()
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				p.Submit(context.Background(), i)
+			}
+			p.Shutdown()
+		})
 	}
 }

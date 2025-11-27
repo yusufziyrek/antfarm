@@ -3,38 +3,29 @@ package antfarm
 import "context"
 
 // worker is the main loop for a worker goroutine.
+// It consumes jobs from the jobQueue, processes them, and sends results to the resultQueue.
 func (p *Pool[T, R]) worker() {
 	defer p.wg.Done()
 
-	// Create a background context for the worker.
-	// In a real app, we might want to pass a context to Start() or store it in Pool.
-	// For now, we use Background, but the Handler receives it.
-	ctx := context.Background()
-
-	for job := range p.jobQueue {
-		// Check if we should stop early (optional, depending on requirements)
-		select {
-		case <-p.quit:
-			// If we want to drain the queue, we shouldn't return here.
-			// But if 'quit' is for hard stop, we would.
-			// Our Shutdown closes jobQueue, so 'range' handles draining.
-			// 'quit' is mostly for unblocking Submit.
-		default:
+	for wrapper := range p.jobQueue {
+		ctx := wrapper.ctx
+		if ctx == nil {
+			ctx = context.Background()
 		}
 
-		// Execute the handler (with middleware)
-		result, err := p.handler(ctx, job)
+		result, err := p.handler(ctx, wrapper.payload)
 
-		// Send result
-		// Non-blocking send to avoid deadlocks if no one is listening to results
-		// OR blocking if we want strict backpressure.
-		// Given "high performance" and "worker pool", usually we want to avoid dropping results.
-		// However, if the user doesn't read results, this will block the worker.
-		// We should document that Results() must be consumed if R is not struct{}.
-
-		// Send result
-		// We block here to ensure backpressure and guaranteed delivery.
-		// Users must consume Results() channel to prevent deadlocks.
-		p.resultQueue <- Result[R]{Value: result, Err: err}
+		// Send result with anti-deadlock logic.
+		// If the result queue is full and the pool is shutting down,
+		// we abandon the result to ensure the worker terminates.
+		select {
+		case p.resultQueue <- Result[R]{Value: result, Err: err}:
+		default:
+			select {
+			case p.resultQueue <- Result[R]{Value: result, Err: err}:
+			case <-p.quit:
+				return
+			}
+		}
 	}
 }
