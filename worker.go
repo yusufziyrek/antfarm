@@ -39,17 +39,9 @@ func (p *Pool[T, R]) worker() {
 			atomic.AddUint64(&p.completedJobs, 1)
 		}
 
-		// Send result with anti-deadlock logic.
-		// If the result queue is full and the pool is shutting down,
-		// we abandon the result to ensure the worker terminates.
-		select {
-		case p.resultQueue <- Result[R]{Value: result, Err: err}:
-		default:
-			select {
-			case p.resultQueue <- Result[R]{Value: result, Err: err}:
-			case <-p.quit:
-				return
-			}
-		}
+		// Send result.
+		// We block here to ensure the result is delivered.
+		// The user must drain the Results channel to prevent deadlocks during Shutdown.
+		p.resultQueue <- Result[R]{Value: result, Err: err}
 	}
 }
