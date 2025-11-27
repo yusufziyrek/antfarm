@@ -49,6 +49,21 @@ type Pool[T any, R any] struct {
 	quit     chan struct{}
 	closed   int32 // Atomic flag (0: open, 1: closed)
 	mu       sync.RWMutex
+
+	// stats
+	busyWorkers   int32
+	submittedJobs uint64
+	completedJobs uint64
+	failedJobs    uint64
+}
+
+// Stats contains runtime metrics of the worker pool.
+type Stats struct {
+	Concurrency   int
+	BusyWorkers   int
+	SubmittedJobs uint64
+	CompletedJobs uint64
+	FailedJobs    uint64
 }
 
 // New creates a new Pool with the specified concurrency level and job handler.

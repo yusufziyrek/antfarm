@@ -33,6 +33,8 @@ func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
 
 	defer p.submitWg.Done()
 
+	atomic.AddUint64(&p.submittedJobs, 1)
+
 	select {
 	case p.jobQueue <- jobWrapper[T]{ctx: ctx, payload: job}:
 		return nil
@@ -40,6 +42,17 @@ func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
 		return ctx.Err()
 	case <-p.quit:
 		return ErrPoolClosed
+	}
+}
+
+// Stats returns a snapshot of the pool's runtime metrics.
+func (p *Pool[T, R]) Stats() Stats {
+	return Stats{
+		Concurrency:   p.concurrency,
+		BusyWorkers:   int(atomic.LoadInt32(&p.busyWorkers)),
+		SubmittedJobs: atomic.LoadUint64(&p.submittedJobs),
+		CompletedJobs: atomic.LoadUint64(&p.completedJobs),
+		FailedJobs:    atomic.LoadUint64(&p.failedJobs),
 	}
 }
 

@@ -3,6 +3,7 @@ package antfarm_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -80,7 +81,6 @@ func TestPool_TableDriven(t *testing.T) {
 				if tt.wantErr {
 					if res.Err == nil {
 						// In this specific test case, we expect ALL to fail.
-						// In a real scenario, we might check specific errors.
 					}
 				} else {
 					if res.Err != nil {
@@ -192,6 +192,88 @@ func TestMiddleware(t *testing.T) {
 		if executionLog[i] != v {
 			t.Errorf("index %d: expected %s, got %s", i, v, executionLog[i])
 		}
+	}
+}
+
+// TestPanicRecovery ensures that panics in handlers are caught and returned as errors.
+func TestPanicRecovery(t *testing.T) {
+	handler := func(ctx context.Context, job int) (int, error) {
+		if job == 666 {
+			panic("something went wrong")
+		}
+		return job, nil
+	}
+
+	pool := antfarm.New(1, handler)
+	pool.Start()
+
+	go func() {
+		pool.Submit(context.Background(), 666)
+		pool.Shutdown()
+	}()
+
+	res := <-pool.Results()
+	if res.Err == nil {
+		t.Error("expected error from panic, got nil")
+	}
+	if !strings.Contains(res.Err.Error(), "panic recovered") {
+		t.Errorf("expected panic error message, got: %v", res.Err)
+	}
+}
+
+// TestStats verifies that stats are updated correctly.
+func TestStats(t *testing.T) {
+	var block = make(chan struct{})
+	handler := func(ctx context.Context, job int) (int, error) {
+		if job == 1 {
+			<-block // Block this worker
+			return job, nil
+		}
+		if job == 2 {
+			return 0, errors.New("fail")
+		}
+		return job, nil
+	}
+
+	pool := antfarm.New(2, handler)
+	pool.Start()
+
+	// Submit job 1 (will block)
+	go pool.Submit(context.Background(), 1)
+
+	// Wait for worker to pick it up
+	time.Sleep(50 * time.Millisecond)
+
+	stats := pool.Stats()
+	if stats.BusyWorkers != 1 {
+		t.Errorf("expected 1 busy worker, got %d", stats.BusyWorkers)
+	}
+	if stats.SubmittedJobs != 1 {
+		t.Errorf("expected 1 submitted job, got %d", stats.SubmittedJobs)
+	}
+
+	// Submit job 2 (will fail)
+	go pool.Submit(context.Background(), 2)
+	time.Sleep(50 * time.Millisecond) // Wait for processing
+
+	stats = pool.Stats()
+	if stats.FailedJobs != 1 {
+		t.Errorf("expected 1 failed job, got %d", stats.FailedJobs)
+	}
+
+	// Unblock job 1
+	close(block)
+
+	// Drain results
+	go func() {
+		for range pool.Results() {
+		}
+	}()
+	pool.Shutdown()
+
+	stats = pool.Stats()
+	if stats.CompletedJobs != 1 {
+		t.Errorf("expected 1 completed job, got %d", stats.CompletedJobs)
 	}
 }
 
