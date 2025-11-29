@@ -3,7 +3,6 @@ package antfarm
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 )
 
 // worker is the main loop for a worker goroutine.
@@ -17,7 +16,7 @@ func (p *Pool[T, R]) worker() {
 			ctx = context.Background()
 		}
 
-		atomic.AddInt32(&p.busyWorkers, 1)
+		p.busyWorkers.Add(1)
 
 		var result R
 		var err error
@@ -31,12 +30,12 @@ func (p *Pool[T, R]) worker() {
 			result, err = p.handler(ctx, wrapper.payload)
 		}()
 
-		atomic.AddInt32(&p.busyWorkers, -1)
+		p.busyWorkers.Add(-1)
 
 		if err != nil {
-			atomic.AddUint64(&p.failedJobs, 1)
+			p.failedJobs.Add(1)
 		} else {
-			atomic.AddUint64(&p.completedJobs, 1)
+			p.completedJobs.Add(1)
 		}
 
 		// Send result.

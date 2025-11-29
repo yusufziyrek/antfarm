@@ -2,7 +2,6 @@ package antfarm
 
 import (
 	"context"
-	"sync/atomic"
 )
 
 // Start initializes the worker goroutines and begins processing jobs.
@@ -19,12 +18,12 @@ func (p *Pool[T, R]) Start() {
 // It returns ErrPoolClosed if the pool is shutting down or closed.
 // The provided context is passed to the handler and can be used for cancellation or timeouts.
 func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
-	if atomic.LoadInt32(&p.closed) == 1 {
+	if p.closed.Load() == 1 {
 		return ErrPoolClosed
 	}
 
 	p.mu.RLock()
-	if atomic.LoadInt32(&p.closed) == 1 {
+	if p.closed.Load() == 1 {
 		p.mu.RUnlock()
 		return ErrPoolClosed
 	}
@@ -33,7 +32,7 @@ func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
 
 	defer p.submitWg.Done()
 
-	atomic.AddUint64(&p.submittedJobs, 1)
+	p.submittedJobs.Add(1)
 
 	select {
 	case p.jobQueue <- jobWrapper[T]{ctx: ctx, payload: job}:
@@ -45,14 +44,50 @@ func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
 	}
 }
 
+// TrySubmit adds a job to the pool if the queue is not full.
+// It returns ErrPoolFull if the queue is full.
+// It returns ErrPoolClosed if the pool is shutting down or closed.
+func (p *Pool[T, R]) TrySubmit(ctx context.Context, job T) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	if p.closed.Load() == 1 {
+		return ErrPoolClosed
+	}
+
+	p.mu.RLock()
+	if p.closed.Load() == 1 {
+		p.mu.RUnlock()
+		return ErrPoolClosed
+	}
+	p.submitWg.Add(1)
+	p.mu.RUnlock()
+
+	defer p.submitWg.Done()
+
+	p.submittedJobs.Add(1)
+
+	select {
+	case p.jobQueue <- jobWrapper[T]{ctx: ctx, payload: job}:
+		return nil
+	case <-p.quit:
+		return ErrPoolClosed
+	default:
+		return ErrPoolFull
+	}
+}
+
 // Stats returns a snapshot of the pool's runtime metrics.
 func (p *Pool[T, R]) Stats() Stats {
 	return Stats{
 		Concurrency:   p.concurrency,
-		BusyWorkers:   int(atomic.LoadInt32(&p.busyWorkers)),
-		SubmittedJobs: atomic.LoadUint64(&p.submittedJobs),
-		CompletedJobs: atomic.LoadUint64(&p.completedJobs),
-		FailedJobs:    atomic.LoadUint64(&p.failedJobs),
+		BusyWorkers:   int(p.busyWorkers.Load()),
+		SubmittedJobs: p.submittedJobs.Load(),
+		CompletedJobs: p.completedJobs.Load(),
+		FailedJobs:    p.failedJobs.Load(),
 	}
 }
 
@@ -70,11 +105,11 @@ func (p *Pool[T, R]) Results() <-chan Result[R] {
 // Finally, it closes the results channel.
 func (p *Pool[T, R]) Shutdown() {
 	p.mu.Lock()
-	if atomic.LoadInt32(&p.closed) == 1 {
+	if p.closed.Load() == 1 {
 		p.mu.Unlock()
 		return
 	}
-	atomic.StoreInt32(&p.closed, 1)
+	p.closed.Store(1)
 	p.mu.Unlock()
 
 	close(p.quit)

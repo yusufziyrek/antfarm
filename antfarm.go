@@ -5,6 +5,7 @@ package antfarm
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // Handler defines the function signature for processing a single job.
@@ -47,14 +48,14 @@ type Pool[T any, R any] struct {
 	wg       sync.WaitGroup
 	submitWg sync.WaitGroup // Waits for active Submit calls to finish
 	quit     chan struct{}
-	closed   int32 // Atomic flag (0: open, 1: closed)
+	closed   atomic.Int32 // Atomic flag (0: open, 1: closed)
 	mu       sync.RWMutex
 
 	// stats
-	busyWorkers   int32
-	submittedJobs uint64
-	completedJobs uint64
-	failedJobs    uint64
+	busyWorkers   atomic.Int32
+	submittedJobs atomic.Uint64
+	completedJobs atomic.Uint64
+	failedJobs    atomic.Uint64
 }
 
 // Stats contains runtime metrics of the worker pool.

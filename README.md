@@ -61,6 +61,17 @@ func main() {
 }
 ```
 
+### Non-blocking Submission
+
+If you want to drop jobs when the pool is full instead of blocking:
+
+```go
+err := pool.TrySubmit(ctx, job)
+if err == antfarm.ErrPoolFull {
+    // Handle dropped job (e.g., return 503 Service Unavailable)
+}
+```
+
 > **⚠️ Note on Backpressure:** AntFarm uses blocking channels to ensure data safety and backpressure. You should consume the `Results()` channel (or drain it) to prevent workers from blocking if the result buffer fills up.
 
 ## 🛠 Configuration & Middleware
