@@ -12,8 +12,15 @@ import (
 func TestTrySubmit(t *testing.T) {
 	// Create a pool with 1 worker and 0 buffer (unbuffered)
 	// This ensures that if the worker is busy, TrySubmit should fail immediately.
+
+	started := make(chan struct{})
+	block := make(chan struct{})
+
 	handler := func(ctx context.Context, job int) (int, error) {
-		time.Sleep(100 * time.Millisecond) // Simulate work
+		if job == 1 {
+			close(started)
+			<-block // Keep busy
+		}
 		return job, nil
 	}
 
@@ -32,8 +39,8 @@ func TestTrySubmit(t *testing.T) {
 		t.Fatalf("Submit failed: %v", err)
 	}
 
-	// Wait a bit to ensure worker picks it up
-	time.Sleep(10 * time.Millisecond)
+	// Wait for worker to pick it up
+	<-started
 
 	// 2. TrySubmit should fail because worker is busy and buffer is 0
 	err := pool.TrySubmit(context.Background(), 2)
@@ -41,11 +48,34 @@ func TestTrySubmit(t *testing.T) {
 		t.Errorf("expected ErrPoolFull, got %v", err)
 	}
 
-	// 3. Wait for worker to finish
-	time.Sleep(150 * time.Millisecond)
+	// 3. Unblock worker
+	close(block)
 
-	// 4. TrySubmit should succeed now
-	if err := pool.TrySubmit(context.Background(), 3); err != nil {
-		t.Errorf("expected success, got %v", err)
+	// We need to wait for the worker to be free again.
+	// Since we don't have a direct "worker idle" signal, we can retry TrySubmit until it succeeds,
+	// or wait for the result of job 1 (which we are draining).
+	// But draining happens in background.
+	// We can just retry TrySubmit with a small timeout or loop.
+	// Ideally, we should wait for job 1 to finish.
+	// Since we are draining results, we can't easily check result of job 1 here unless we change the drain logic.
+
+	// Let's change drain logic to just drain.
+	// We can use `Eventually` pattern or just a loop.
+
+	timeout := time.After(1 * time.Second)
+	success := false
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("timed out waiting for TrySubmit to succeed")
+		default:
+			if err := pool.TrySubmit(context.Background(), 3); err == nil {
+				success = true
+			}
+		}
+		if success {
+			break
+		}
+		time.Sleep(10 * time.Millisecond) // Small sleep for retry loop
 	}
 }

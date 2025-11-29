@@ -100,12 +100,16 @@ func TestPool_TableDriven(t *testing.T) {
 func TestConcurrency(t *testing.T) {
 	concurrency := 5
 	startGate := make(chan struct{})
+	readyWg := sync.WaitGroup{}
+	readyWg.Add(concurrency)
+
 	var activeWorkers int32
 
 	handler := func(ctx context.Context, _ int) (int, error) {
+		readyWg.Done() // Signal that worker is ready and running
+		<-startGate    // Wait for signal to proceed
 		atomic.AddInt32(&activeWorkers, 1)
 		defer atomic.AddInt32(&activeWorkers, -1)
-		<-startGate
 		return 0, nil
 	}
 
@@ -123,15 +127,69 @@ func TestConcurrency(t *testing.T) {
 		go pool.Submit(context.Background(), i)
 	}
 
-	// Allow goroutines to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for all workers to be running and blocked on startGate
+	readyWg.Wait()
 
-	currentActive := atomic.LoadInt32(&activeWorkers)
-	if currentActive != int32(concurrency) {
-		t.Errorf("expected %d active workers, got %d", concurrency, currentActive)
+	// Now we know all workers are active (but blocked), so we can check if they are all running.
+	// However, since they are blocked BEFORE incrementing activeWorkers in my new logic,
+	// I need to adjust the test logic or the handler logic.
+	// Actually, to test concurrency limit, we want to ensure that NO MORE than `concurrency` workers are running.
+	// But here we are testing that AT LEAST `concurrency` workers ARE running.
+
+	// Let's adjust the handler to increment BEFORE waiting, so we can verify they are all up.
+	// But if we increment before waiting, we need another way to know they reached that point.
+	// readyWg.Done() does exactly that.
+
+	// So if readyWg.Wait() returns, it means `concurrency` goroutines have started.
+	// We don't strictly need `activeWorkers` counter if we trust `readyWg`, but let's keep it for sanity check
+	// if we move the increment up.
+	
+	// Correct logic for "TestConcurrency":
+	// We want to prove that `concurrency` jobs are being processed simultaneously.
+	
+	close(startGate) // Release them
+	pool.Shutdown()
+}
+
+// TestConcurrency_Real ensures workers run in parallel.
+func TestConcurrency_Real(t *testing.T) {
+	concurrency := 5
+	// We want to ensure that 5 workers are running at the same time.
+	// We can use a barrier.
+	
+	barrier := make(chan struct{})
+	ready := make(chan struct{}, concurrency)
+	
+	handler := func(ctx context.Context, _ int) (int, error) {
+		ready <- struct{}{} // Signal ready
+		<-barrier // Wait for all to be ready
+		return 0, nil
 	}
 
-	close(startGate)
+	pool := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
+	pool.Start()
+
+	go func() {
+		for range pool.Results() {}
+	}()
+
+	for i := 0; i < concurrency; i++ {
+		go pool.Submit(context.Background(), i)
+	}
+
+	// Wait for all 5 to signal ready
+	timeout := time.After(1 * time.Second)
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-ready:
+		case <-timeout:
+			t.Fatalf("timed out waiting for worker %d", i)
+		}
+	}
+
+	// If we reached here, 5 workers are currently blocked on <-barrier.
+	// This proves 5 concurrent executions.
+	close(barrier)
 	pool.Shutdown()
 }
 
@@ -223,13 +281,21 @@ func TestPanicRecovery(t *testing.T) {
 
 // TestStats verifies that stats are updated correctly.
 func TestStats(t *testing.T) {
-	var block = make(chan struct{})
+	// Channels to coordinate execution
+	job1Started := make(chan struct{})
+	job1Block := make(chan struct{})
+	
+	job2Started := make(chan struct{})
+	// job2 doesn't block, it just fails
+
 	handler := func(ctx context.Context, job int) (int, error) {
 		if job == 1 {
-			<-block // Block this worker
+			close(job1Started)
+			<-job1Block // Block this worker
 			return job, nil
 		}
 		if job == 2 {
+			close(job2Started)
 			return 0, errors.New("fail")
 		}
 		return job, nil
@@ -242,7 +308,7 @@ func TestStats(t *testing.T) {
 	go pool.Submit(context.Background(), 1)
 
 	// Wait for worker to pick it up
-	time.Sleep(50 * time.Millisecond)
+	<-job1Started
 
 	stats := pool.Stats()
 	if stats.BusyWorkers != 1 {
@@ -254,7 +320,24 @@ func TestStats(t *testing.T) {
 
 	// Submit job 2 (will fail)
 	go pool.Submit(context.Background(), 2)
-	time.Sleep(50 * time.Millisecond) // Wait for processing
+	
+	// Wait for job 2 to start (and finish immediately after)
+	<-job2Started
+	
+	// We need to wait for job 2 to actually finish processing and update stats.
+	// Since we don't have a "job finished" channel exposed from the pool, 
+	// and we are inside the test, we can just wait for the result to appear in Results().
+	// But Results() gives us the result, it doesn't guarantee the stats are updated YET 
+	// (though usually it happens before sending result).
+	// Looking at worker.go: 
+	// p.failedJobs.Add(1) -> p.resultQueue <- Result
+	// So if we receive the result, the stats ARE updated.
+
+	// Let's consume one result (which should be job 2, as job 1 is blocked)
+	res := <-pool.Results()
+	if res.Value != 0 { // Job 2 returns 0 on error
+		t.Errorf("expected job 2 result, got %v", res)
+	}
 
 	stats = pool.Stats()
 	if stats.FailedJobs != 1 {
@@ -262,13 +345,11 @@ func TestStats(t *testing.T) {
 	}
 
 	// Unblock job 1
-	close(block)
+	close(job1Block)
 
-	// Drain results
-	go func() {
-		for range pool.Results() {
-		}
-	}()
+	// Drain remaining results (job 1)
+	<-pool.Results()
+	
 	pool.Shutdown()
 
 	stats = pool.Stats()
