@@ -84,24 +84,20 @@ AntFarm uses the **Functional Options** pattern for configuration.
 pool := antfarm.New(10, handler, antfarm.WithBufferSize[int, int](100))
 ```
 
-### Adding Middleware (Logging, Retries, etc.)
+### Adding Middleware
 
-You can wrap your handler with middleware to add functionality without changing the core logic.
+AntFarm comes with a dedicated `middleware` package containing standard implementations like **Logging**, **RateLimit**, and **CircuitBreaker**.
 
 ```go
-// Example: A simple logging middleware
-func LoggingMiddleware[T any, R any](next antfarm.Handler[T, R]) antfarm.Handler[T, R] {
-    return func(ctx context.Context, job T) (R, error) {
-        fmt.Println("Job started")
-        res, err := next(ctx, job)
-        fmt.Println("Job finished")
-        return res, err
-    }
-}
+import "github.com/yusufziyrek/antfarm/middleware"
 
-// Usage
+// ...
+
 pool := antfarm.New(5, handler, 
-    antfarm.WithMiddleware(LoggingMiddleware[int, int]),
+    antfarm.WithMiddleware(
+        middleware.Logging[int, int](nil), // Logs to standard output
+        middleware.RateLimit[int, int](100, time.Second), // 100 req/sec
+    ),
 )
 ```
 

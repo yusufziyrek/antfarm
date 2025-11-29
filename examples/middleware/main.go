@@ -3,51 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"time"
 
 	"github.com/yusufziyrek/antfarm"
+	"github.com/yusufziyrek/antfarm/middleware"
 )
-
-// LoggingMiddleware logs the start and end of each job.
-func LoggingMiddleware[T any, R any](next antfarm.Handler[T, R]) antfarm.Handler[T, R] {
-	return func(ctx context.Context, job T) (R, error) {
-		start := time.Now()
-		log.Printf("Job started: %v", job)
-
-		res, err := next(ctx, job)
-
-		duration := time.Since(start)
-		if err != nil {
-			log.Printf("Job failed after %v: %v", duration, err)
-		} else {
-			log.Printf("Job completed in %v: %v", duration, res)
-		}
-
-		return res, err
-	}
-}
-
-// RetryMiddleware retries the job up to `attempts` times if it fails.
-func RetryMiddleware[T any, R any](attempts int) antfarm.Middleware[T, R] {
-	return func(next antfarm.Handler[T, R]) antfarm.Handler[T, R] {
-		return func(ctx context.Context, job T) (R, error) {
-			var err error
-			var res R
-
-			for i := 0; i < attempts; i++ {
-				res, err = next(ctx, job)
-				if err == nil {
-					return res, nil
-				}
-				log.Printf("Attempt %d failed: %v. Retrying...", i+1, err)
-				time.Sleep(time.Millisecond * 10) // Backoff
-			}
-			return res, err
-		}
-	}
-}
 
 func main() {
 	// A handler that randomly fails
@@ -59,23 +20,23 @@ func main() {
 	}
 
 	// Create pool with Middleware:
-	// 1. Retry (Outer) - catches errors from inner layers
-	// 2. Logging (Inner) - logs individual attempts
-	// Note: Order matters!
-	// If we want to log *each* retry attempt, Logging should be *inside* Retry.
-	// Structure: Retry( Logging( Handler ) )
+	// 1. CircuitBreaker (Outer) - protects downstream
+	// 2. RateLimit (Middle) - controls throughput
+	// 3. Logging (Inner) - logs execution
 	pool := antfarm.New(2, flakyHandler,
 		antfarm.WithMiddleware(
-			RetryMiddleware[int, string](3),
-			LoggingMiddleware[int, string],
+			middleware.CircuitBreaker[int, string](3, time.Second*2),
+			middleware.RateLimit[int, string](10, time.Second),
+			middleware.Logging[int, string](nil),
 		),
 	)
 
 	pool.Start()
 
 	go func() {
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 20; i++ {
 			pool.Submit(context.Background(), i)
+			time.Sleep(100 * time.Millisecond)
 		}
 		pool.Shutdown()
 	}()
