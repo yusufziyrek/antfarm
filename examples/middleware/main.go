@@ -27,7 +27,7 @@ func main() {
 		antfarm.WithMiddleware(
 			middleware.CircuitBreaker[int, string](3, time.Second*2),
 			middleware.RateLimit[int, string](10, time.Second),
-			middleware.Logging[int, string](nil),
+			middleware.Logging[int, string](nil), // Uses default slog logger
 		),
 	)
 

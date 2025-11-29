@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ import (
 
 func TestLogging(t *testing.T) {
 	var buf bytes.Buffer
-	logger := log.New(&buf, "", 0)
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
 	handler := func(ctx context.Context, job int) (int, error) {
 		return job, nil
