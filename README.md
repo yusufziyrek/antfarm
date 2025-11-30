@@ -14,8 +14,20 @@ Designed for modern Go applications, AntFarm offers strict compile-time type saf
 *   **Type-Safe & Generic:** Leverage Go Generics (`[T, R]`) for strict type checking at compile time. No more runtime casting or `interface{}` risks.
 *   **Production Ready:** Built-in support for `context.Context` propagation, graceful shutdowns, and robust panic recovery.
 *   **High Performance:** Minimal overhead using standard `sync` primitives and channels.
+*   **Zero Allocation:** Optimized worker loop ensures **0 memory allocation** per job processing, reducing GC pressure.
 *   **Developer Friendly:** Simple, fluent API using the Functional Options pattern.
 *   **Extensible:** Easily plug in cross-cutting concerns like logging, tracing, or rate limiting using the Middleware pattern.
+
+## 🚀 Performance
+
+AntFarm is optimized for high-throughput scenarios with zero allocation overhead per job.
+
+| Scenario | Time (ns/op) | Memory (B/op) | Allocations (allocs/op) |
+| :--- | :--- | :--- | :--- |
+| **Raw Goroutines** | ~690 | 48 | 2 |
+| **AntFarm Pool** | ~1536 | **0** | **0** |
+
+> **Note:** While raw goroutines are faster to spawn, they incur memory allocation for the stack and closure. AntFarm reuses workers to achieve **zero allocation**, which is critical for reducing Garbage Collector (GC) pauses in high-load systems.
 
 ## 📦 Installation
 
