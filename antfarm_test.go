@@ -143,10 +143,10 @@ func TestConcurrency(t *testing.T) {
 	// So if readyWg.Wait() returns, it means `concurrency` goroutines have started.
 	// We don't strictly need `activeWorkers` counter if we trust `readyWg`, but let's keep it for sanity check
 	// if we move the increment up.
-	
+
 	// Correct logic for "TestConcurrency":
 	// We want to prove that `concurrency` jobs are being processed simultaneously.
-	
+
 	close(startGate) // Release them
 	pool.Shutdown()
 }
@@ -156,13 +156,13 @@ func TestConcurrency_Real(t *testing.T) {
 	concurrency := 5
 	// We want to ensure that 5 workers are running at the same time.
 	// We can use a barrier.
-	
+
 	barrier := make(chan struct{})
 	ready := make(chan struct{}, concurrency)
-	
+
 	handler := func(ctx context.Context, _ int) (int, error) {
 		ready <- struct{}{} // Signal ready
-		<-barrier // Wait for all to be ready
+		<-barrier           // Wait for all to be ready
 		return 0, nil
 	}
 
@@ -170,7 +170,8 @@ func TestConcurrency_Real(t *testing.T) {
 	pool.Start()
 
 	go func() {
-		for range pool.Results() {}
+		for range pool.Results() {
+		}
 	}()
 
 	for i := 0; i < concurrency; i++ {
@@ -284,7 +285,7 @@ func TestStats(t *testing.T) {
 	// Channels to coordinate execution
 	job1Started := make(chan struct{})
 	job1Block := make(chan struct{})
-	
+
 	job2Started := make(chan struct{})
 	// job2 doesn't block, it just fails
 
@@ -320,16 +321,16 @@ func TestStats(t *testing.T) {
 
 	// Submit job 2 (will fail)
 	go pool.Submit(context.Background(), 2)
-	
+
 	// Wait for job 2 to start (and finish immediately after)
 	<-job2Started
-	
+
 	// We need to wait for job 2 to actually finish processing and update stats.
-	// Since we don't have a "job finished" channel exposed from the pool, 
+	// Since we don't have a "job finished" channel exposed from the pool,
 	// and we are inside the test, we can just wait for the result to appear in Results().
-	// But Results() gives us the result, it doesn't guarantee the stats are updated YET 
+	// But Results() gives us the result, it doesn't guarantee the stats are updated YET
 	// (though usually it happens before sending result).
-	// Looking at worker.go: 
+	// Looking at worker.go:
 	// p.failedJobs.Add(1) -> p.resultQueue <- Result
 	// So if we receive the result, the stats ARE updated.
 
@@ -349,7 +350,7 @@ func TestStats(t *testing.T) {
 
 	// Drain remaining results (job 1)
 	<-pool.Results()
-	
+
 	pool.Shutdown()
 
 	stats = pool.Stats()
@@ -393,4 +394,42 @@ func BenchmarkPool(b *testing.B) {
 			p.Shutdown()
 		})
 	}
+}
+
+// BenchmarkGoroutines compares the pool against raw goroutines.
+func BenchmarkGoroutines(b *testing.B) {
+	handler := func(ctx context.Context, job int) (int, error) {
+		return job, nil
+	}
+
+	b.Run("RawGoroutines", func(b *testing.B) {
+		var wg sync.WaitGroup
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			go func(val int) {
+				defer wg.Done()
+				handler(context.Background(), val)
+			}(i)
+		}
+		wg.Wait()
+	})
+
+	b.Run("AntFarm_Pool", func(b *testing.B) {
+		// Use a reasonable fixed size to show the benefit of pooling.
+		p := antfarm.New(100, handler, antfarm.WithBufferSize[int, int](1000))
+		p.Start()
+
+		// Consumer to drain results
+		go func() {
+			for range p.Results() {
+			}
+		}()
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			p.Submit(context.Background(), i)
+		}
+		p.Shutdown()
+	})
 }
