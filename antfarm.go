@@ -33,6 +33,13 @@ type jobWrapper[T any] struct {
 // Pool is a high-performance, type-safe worker pool.
 // It manages a fixed number of workers to process jobs concurrently.
 type Pool[T any, R any] struct {
+	// stats (atomic fields first for 64-bit alignment on 32-bit systems)
+	submittedJobs atomic.Uint64
+	completedJobs atomic.Uint64
+	failedJobs    atomic.Uint64
+	busyWorkers   atomic.Int32
+	closed        atomic.Int32 // Atomic flag (0: open, 1: closed)
+
 	// core
 	handler Handler[T, R]
 
@@ -48,14 +55,7 @@ type Pool[T any, R any] struct {
 	wg       sync.WaitGroup
 	submitWg sync.WaitGroup // Waits for active Submit calls to finish
 	quit     chan struct{}
-	closed   atomic.Int32 // Atomic flag (0: open, 1: closed)
 	mu       sync.RWMutex
-
-	// stats
-	busyWorkers   atomic.Int32
-	submittedJobs atomic.Uint64
-	completedJobs atomic.Uint64
-	failedJobs    atomic.Uint64
 }
 
 // Stats contains runtime metrics of the worker pool.
@@ -71,6 +71,9 @@ type Stats struct {
 // It applies any provided functional options to configure the pool.
 // If concurrency is less than or equal to 0, it defaults to 1.
 func New[T any, R any](concurrency int, handler Handler[T, R], opts ...Option[T, R]) *Pool[T, R] {
+	if handler == nil {
+		panic("antfarm: handler cannot be nil")
+	}
 	concurrency = max(1, concurrency)
 
 	p := &Pool[T, R]{

@@ -18,6 +18,9 @@ func (p *Pool[T, R]) Start() {
 // It returns ErrPoolClosed if the pool is shutting down or closed.
 // The provided context is passed to the handler and can be used for cancellation or timeouts.
 func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if p.closed.Load() == 1 {
 		return ErrPoolClosed
 	}
@@ -48,6 +51,9 @@ func (p *Pool[T, R]) Submit(ctx context.Context, job T) error {
 // It returns ErrPoolFull if the queue is full.
 // It returns ErrPoolClosed if the pool is shutting down or closed.
 func (p *Pool[T, R]) TrySubmit(ctx context.Context, job T) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

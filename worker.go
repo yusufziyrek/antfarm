@@ -1,12 +1,9 @@
 package antfarm
 
 import (
-	"context"
 	"fmt"
 )
 
-// worker is the main loop for a worker goroutine.
-// It consumes jobs from the jobQueue, processes them, and sends results to the resultQueue.
 // worker is the main loop for a worker goroutine.
 // It consumes jobs from the jobQueue, processes them, and sends results to the resultQueue.
 func (p *Pool[T, R]) worker() {
@@ -20,9 +17,6 @@ func (p *Pool[T, R]) worker() {
 // executeJob processes a single job and handles panic recovery.
 func (p *Pool[T, R]) executeJob(wrapper jobWrapper[T]) {
 	ctx := wrapper.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	p.busyWorkers.Add(1)
 
