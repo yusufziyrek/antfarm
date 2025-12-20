@@ -5,8 +5,12 @@ import (
 )
 
 // Start initializes the worker goroutines and begins processing jobs.
-// This method is non-blocking.
+// This method is non-blocking. It is idempotent; calling it multiple times has no effect.
 func (p *Pool[T, R]) Start() {
+	if !p.started.CompareAndSwap(0, 1) {
+		return
+	}
+
 	p.wg.Add(p.concurrency)
 	for i := 0; i < p.concurrency; i++ {
 		go p.worker()

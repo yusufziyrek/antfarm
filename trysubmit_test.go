@@ -24,7 +24,10 @@ func TestTrySubmit(t *testing.T) {
 		return job, nil
 	}
 
-	pool := antfarm.New(1, handler, antfarm.WithBufferSize[int, int](0))
+	pool, err := antfarm.New(1, handler, antfarm.WithBufferSize[int, int](0))
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 	defer pool.Shutdown()
 
@@ -43,7 +46,7 @@ func TestTrySubmit(t *testing.T) {
 	<-started
 
 	// 2. TrySubmit should fail because worker is busy and buffer is 0
-	err := pool.TrySubmit(context.Background(), 2)
+	err = pool.TrySubmit(context.Background(), 2)
 	if err != antfarm.ErrPoolFull {
 		t.Errorf("expected ErrPoolFull, got %v", err)
 	}

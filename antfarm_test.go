@@ -12,6 +12,14 @@ import (
 	"github.com/yusufziyrek/antfarm"
 )
 
+// TestNew_NilHandler ensures that New returns an error if the handler is nil.
+func TestNew_NilHandler(t *testing.T) {
+	_, err := antfarm.New[int, int](1, nil)
+	if err == nil {
+		t.Error("expected error when creating pool with nil handler, got nil")
+	}
+}
+
 // TestPool_TableDriven validates the pool's behavior using table-driven tests.
 func TestPool_TableDriven(t *testing.T) {
 	tests := []struct {
@@ -61,7 +69,10 @@ func TestPool_TableDriven(t *testing.T) {
 				opts = append(opts, antfarm.WithBufferSize[int, int](tt.bufferSize))
 			}
 
-			p := antfarm.New(tt.concurrency, tt.handler, opts...)
+			p, err := antfarm.New(tt.concurrency, tt.handler, opts...)
+			if err != nil {
+				t.Fatalf("New failed: %v", err)
+			}
 			p.Start()
 
 			// Submit jobs in a separate goroutine
@@ -113,7 +124,10 @@ func TestConcurrency(t *testing.T) {
 		return 0, nil
 	}
 
-	pool := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
+	pool, err := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 
 	// Drain results in background
@@ -166,7 +180,10 @@ func TestConcurrency_Real(t *testing.T) {
 		return 0, nil
 	}
 
-	pool := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
+	pool, err := antfarm.New(concurrency, handler, antfarm.WithBufferSize[int, int](concurrency))
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 
 	go func() {
@@ -228,7 +245,10 @@ func TestMiddleware(t *testing.T) {
 		return job, nil
 	}
 
-	pool := antfarm.New(1, handler, antfarm.WithMiddleware(mw1, mw2))
+	pool, err := antfarm.New(1, handler, antfarm.WithMiddleware(mw1, mw2))
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 
 	go func() {
@@ -263,7 +283,10 @@ func TestPanicRecovery(t *testing.T) {
 		return job, nil
 	}
 
-	pool := antfarm.New(1, handler)
+	pool, err := antfarm.New(1, handler)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 
 	go func() {
@@ -302,7 +325,10 @@ func TestStats(t *testing.T) {
 		return job, nil
 	}
 
-	pool := antfarm.New(2, handler)
+	pool, err := antfarm.New(2, handler)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
 	pool.Start()
 
 	// Submit job 1 (will block)
@@ -378,7 +404,7 @@ func BenchmarkPool(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			p := antfarm.New(bm.concurrency, handler, antfarm.WithBufferSize[int, int](bm.buffer))
+			p, _ := antfarm.New(bm.concurrency, handler, antfarm.WithBufferSize[int, int](bm.buffer))
 			p.Start()
 
 			// Consumer
@@ -417,7 +443,7 @@ func BenchmarkGoroutines(b *testing.B) {
 
 	b.Run("AntFarm_Pool", func(b *testing.B) {
 		// Use a reasonable fixed size to show the benefit of pooling.
-		p := antfarm.New(100, handler, antfarm.WithBufferSize[int, int](1000))
+		p, _ := antfarm.New(100, handler, antfarm.WithBufferSize[int, int](1000))
 		p.Start()
 
 		// Consumer to drain results

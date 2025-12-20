@@ -4,6 +4,7 @@ package antfarm
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -40,6 +41,8 @@ type Pool[T any, R any] struct {
 	busyWorkers   atomic.Int32
 	closed        atomic.Int32 // Atomic flag (0: open, 1: closed)
 
+	started atomic.Int32 // Atomic flag (0: not started, 1: started)
+
 	// core
 	handler Handler[T, R]
 
@@ -70,9 +73,10 @@ type Stats struct {
 // New creates a new Pool with the specified concurrency level and job handler.
 // It applies any provided functional options to configure the pool.
 // If concurrency is less than or equal to 0, it defaults to 1.
-func New[T any, R any](concurrency int, handler Handler[T, R], opts ...Option[T, R]) *Pool[T, R] {
+// It returns an error if the handler is nil.
+func New[T any, R any](concurrency int, handler Handler[T, R], opts ...Option[T, R]) (*Pool[T, R], error) {
 	if handler == nil {
-		panic("antfarm: handler cannot be nil")
+		return nil, errors.New("antfarm: handler cannot be nil")
 	}
 	concurrency = max(1, concurrency)
 
@@ -92,5 +96,5 @@ func New[T any, R any](concurrency int, handler Handler[T, R], opts ...Option[T,
 	p.jobQueue = make(chan jobWrapper[T], p.bufferSize)
 	p.resultQueue = make(chan Result[R], p.bufferSize)
 
-	return p
+	return p, nil
 }

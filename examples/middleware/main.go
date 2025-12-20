@@ -23,13 +23,16 @@ func main() {
 	// 1. CircuitBreaker (Outer) - protects downstream
 	// 2. RateLimit (Middle) - controls throughput
 	// 3. Logging (Inner) - logs execution
-	pool := antfarm.New(2, flakyHandler,
+	pool, err := antfarm.New(2, flakyHandler,
 		antfarm.WithMiddleware(
 			middleware.CircuitBreaker[int, string](3, time.Second*2),
 			middleware.RateLimit[int, string](10, time.Second),
 			middleware.Logging[int, string](nil), // Uses default slog logger
 		),
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	pool.Start()
 

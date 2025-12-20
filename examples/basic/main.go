@@ -20,7 +20,10 @@ func main() {
 	// Create a pool with 3 workers and a buffer of 5
 	// Note: We must specify types [int, int] for the option generic inference if not clear,
 	// but usually Go infers it from the New call.
-	pool := antfarm.New(3, handler, antfarm.WithBufferSize[int, int](5))
+	pool, err := antfarm.New(3, handler, antfarm.WithBufferSize[int, int](5))
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Start the pool
 	pool.Start()
